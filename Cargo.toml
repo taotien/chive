@@ -6,7 +6,10 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.95"
 clap = { version = "4.5.27", features = ["derive"] }
+env_logger = "0.11.6"
 fuser = "0.15.1"
+libc = "0.2.169"
+log = "0.4.25"
 serde = { version = "1.0.217", features = ["derive"] }
 time = "0.3.37"
 toml = "0.8.19"
