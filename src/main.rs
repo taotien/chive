@@ -8,6 +8,7 @@ use std::{
     time::UNIX_EPOCH,
 };
 
+use chive::fs::ChiveFS;
 use clap::{Parser, Subcommand};
 use fuser::{FileType, MountOption};
 use libc::ENOENT;
@@ -99,147 +100,13 @@ fn chive_exec() -> anyhow::Result<()> {
 }
 
 fn chive_run(path: &Path, mountpoint: &Path) -> anyhow::Result<()> {
-    fuser::mount2(
-        ChiveFS { path: path.into() },
-        mountpoint,
-        &[
-            MountOption::RO,
-            MountOption::FSName("ChiveFS".to_string()),
-            // MountOption::AutoUnmount,
-            // MountOption::AllowRoot,
-        ],
-    )?;
+    let chive = ChiveFS::new(path.into());
+    fuser::mount2(chive, mountpoint, &[
+        MountOption::RO,
+        MountOption::FSName("ChiveFS".to_string()),
+        // MountOption::AutoUnmount,
+        // MountOption::AllowRoot,
+    ])?;
 
     Ok(())
-}
-
-// this is extremely gross
-fn from_metadata_to_fileattr(value: std::fs::Metadata) -> fuser::FileAttr {
-    fuser::FileAttr {
-        ino: value.ino(),
-        size: value.size(),
-        blocks: value.blocks(),
-        atime: value.accessed().unwrap_or(UNIX_EPOCH),
-        mtime: value.modified().unwrap_or(UNIX_EPOCH),
-        ctime: OffsetDateTime::from_unix_timestamp(value.ctime()).map_or(UNIX_EPOCH, |t| t.into()),
-        crtime: value.created().unwrap_or(UNIX_EPOCH),
-        kind: from_filetype_to_filetype(value.file_type()),
-        perm: value.mode().try_into().unwrap(),
-        nlink: value.nlink().try_into().unwrap(),
-        uid: value.uid(),
-        gid: value.gid(),
-        rdev: value.rdev().try_into().unwrap(),
-        blksize: value.blksize().try_into().unwrap(),
-        // FIXME this is MacOS only, does rust even expose this?
-        flags: 0,
-    }
-}
-
-// this is even more gross
-fn from_filetype_to_filetype(value: std::fs::FileType) -> fuser::FileType {
-    use fuser::FileType;
-    if value.is_dir() {
-        FileType::Directory
-    } else if value.is_file() {
-        FileType::RegularFile
-    } else if value.is_symlink() {
-        FileType::Symlink
-    } else if value.is_block_device() {
-        FileType::BlockDevice
-    } else if value.is_char_device() {
-        FileType::CharDevice
-    } else if value.is_fifo() {
-        FileType::NamedPipe
-    } else if value.is_socket() {
-        FileType::Socket
-    } else {
-        unreachable!()
-    }
-}
-
-struct ChiveFS {
-    path: PathBuf,
-}
-
-impl fuser::Filesystem for ChiveFS {
-    fn lookup(
-        &mut self,
-        _req: &fuser::Request<'_>,
-        parent: u64,
-        name: &std::ffi::OsStr,
-        reply: fuser::ReplyEntry,
-    ) {
-        trace!("lookup");
-    }
-
-    fn getattr(
-        &mut self,
-        _req: &fuser::Request<'_>,
-        ino: u64,
-        fh: Option<u64>,
-        reply: fuser::ReplyAttr,
-    ) {
-    }
-
-    fn read(
-        &mut self,
-        _req: &fuser::Request<'_>,
-        ino: u64,
-        fh: u64,
-        offset: i64,
-        size: u32,
-        flags: i32,
-        lock_owner: Option<u64>,
-        reply: fuser::ReplyData,
-    ) {
-        trace!("read");
-    }
-
-    fn readdir(
-        &mut self,
-        _req: &fuser::Request<'_>,
-        ino: u64,
-        fh: u64,
-        offset: i64,
-        mut reply: fuser::ReplyDirectory,
-    ) {
-        trace!("readdir");
-
-        if ino != 1 {
-            reply.error(ENOENT);
-            return;
-        }
-
-        let mut entries = vec![
-            (1, FileType::Directory, ".".to_string()),
-            (1, FileType::Directory, "..".to_string()),
-        ];
-
-        let mut dir_entries: Vec<(u64, FileType, String)> = fs::read_dir(&self.path)
-            .expect("couldn't read {self.path}")
-            .flatten()
-            .filter(|e| e.file_type().is_ok_and(|e| e.is_file()))
-            .filter(|e| e.file_name().to_string_lossy().contains("chive"))
-            .enumerate()
-            .map(|(i, e)| {
-                (
-                    (i + 2) as u64,
-                    FileType::RegularFile,
-                    e.file_name().into_string().unwrap(),
-                )
-            })
-            .collect();
-
-        entries.append(&mut dir_entries);
-
-        debug!("{:?}", entries);
-
-        // let mut ino = 2;
-        for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
-                // ino += 1;
-                break;
-            }
-        }
-    }
 }

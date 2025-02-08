@@ -1,7 +1,7 @@
-export RUST_LOG := "trace"
+export RUST_LOG := "chive=trace"
 
 init:
-    cargo run -- init -p /home/tao/videos/anime/inbox -y
+    cargo run -- init -p testing -y
 
 run:
-    cargo run -- run -p /home/tao/videos/anime/inbox mnt
+    cargo run -- run -p testing mnt
