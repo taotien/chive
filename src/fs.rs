@@ -1,21 +1,27 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     ffi::OsString,
     fmt::Debug,
-    fs::{self},
+    fs::{self, File},
+    io::Read,
     path::PathBuf,
-    time::{Duration, UNIX_EPOCH},
+    time::Duration,
 };
 
-use fuser::{FileAttr, FileType, Filesystem};
+use fuser::{FileAttr, Filesystem};
 use libc::ENOENT;
 use log::{debug, trace};
 
 use crate::from_metadata_to_fileattr;
 
+type Inode = u64;
+
 pub struct ChiveFS {
     pub path: PathBuf,
-    entries: BTreeMap<OsString, (u64, FileAttr)>,
+    entries: BTreeMap<OsString, (Inode, FileAttr)>,
+    // build during lookup, or is elsewhere better?
+    // TODO don't clone again for this reverse lookup?
+    ino_map: HashMap<Inode, OsString>,
 }
 
 impl Debug for ChiveFS {
@@ -28,11 +34,9 @@ const TTL: Duration = Duration::from_secs(1);
 
 impl ChiveFS {
     pub fn new(path: PathBuf) -> Self {
-        // let mut entries = HashMap::from([ ( OsString::from("."), ( 1, FileAttr { ino: todo!(), size: todo!(), blocks: todo!(), atime: todo!(), mtime: todo!(), ctime: todo!(), crtime: todo!(), kind: todo!(), perm: todo!(), nlink: todo!(), uid: todo!(), gid: todo!(), rdev: todo!(), blksize: todo!(), flags: todo!(), }, ), ), (OsString::from(".."), (1,)), ]);
-        let mut entries = BTreeMap::new();
-
-        debug!("{path:?}");
-        entries.extend(
+        // TODO why does example also have "." and ".."?
+        debug!("path: {path:?}");
+        let entries = BTreeMap::from_iter(
             fs::read_dir(&path)
                 .expect("couldn't read {self.path}")
                 .flatten()
@@ -42,17 +46,17 @@ impl ChiveFS {
                 .map(|(i, e)| {
                     (
                         e.file_name(),
-                        (
-                            i as u64 + 2,
-                            from_metadata_to_fileattr(&e.metadata().unwrap()),
-                        ),
+                        (i as u64, from_metadata_to_fileattr(&e.metadata().unwrap())),
                     )
                 }),
         );
+        debug!("entries: {:#?}", entries);
 
-        debug!("entries: {:#?}", entries.keys());
-
-        Self { path, entries }
+        Self {
+            path,
+            entries,
+            ino_map: HashMap::new(),
+        }
     }
 }
 
@@ -67,12 +71,17 @@ impl Filesystem for ChiveFS {
         trace!("lookup");
         debug!("parent: {parent}, name: {name:?}");
 
+        let mut lookup = OsString::from(".");
+        lookup.push(name);
         if parent == 1
-            && let Some(entry) = self.entries.get(name)
+            && let Some((name, (ino, attr))) = self.entries.get_key_value(&lookup)
         {
+            debug!("entry: {attr:?}");
             reply.entry(
-                &TTL, &entry.1, 0, // TODO needs to be unique over NFS, we don't care rn
-            )
+                &TTL, attr, 0, // TODO needs to be unique over NFS, we don't care rn
+            );
+            // TODO don't clone again
+            self.ino_map.insert(attr.ino, name.clone());
         } else {
             reply.error(ENOENT)
         }
@@ -111,6 +120,19 @@ impl Filesystem for ChiveFS {
         reply: fuser::ReplyData,
     ) {
         trace!("read");
+        debug!("ino: {ino}");
+        debug!("fh: {fh}");
+        debug!("offset: {offset}");
+        debug!("size: {size}");
+        debug!("flags: {flags}");
+        debug!("lock_owner: {lock_owner:?}");
+        debug!("reply: {reply:?}");
+
+        let mut path = self.path.clone();
+        path.push(self.ino_map.get(&ino).unwrap());
+        let data: Vec<u8> = File::open(path).unwrap().bytes().flatten().collect();
+
+        reply.data(&data);
     }
 
     fn readdir(
