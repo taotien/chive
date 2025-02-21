@@ -89,23 +89,7 @@ impl Filesystem for ChiveFS {
         match ino {
             1 => reply.attr(
                 &TTL,
-                &FileAttr {
-                    ino: 1,
-                    size: 0,
-                    blocks: 0,
-                    atime: UNIX_EPOCH,
-                    mtime: UNIX_EPOCH,
-                    ctime: UNIX_EPOCH,
-                    crtime: UNIX_EPOCH,
-                    kind: FileType::Directory,
-                    perm: 0o755,
-                    nlink: 0,
-                    uid: 501,
-                    gid: 20,
-                    rdev: 0,
-                    blksize: 512,
-                    flags: 0,
-                },
+                &from_metadata_to_fileattr(&self.path.metadata().unwrap()),
             ),
             //     2 =>
             _ => {
@@ -145,9 +129,14 @@ impl Filesystem for ChiveFS {
         }
 
         for (i, entry) in self.entries.iter().enumerate().skip(offset as usize) {
-            debug!("iter'd: {entry:?}");
-            if reply.add(entry.1.0, (i + 1) as i64, entry.1.1.kind, entry.0) {
-                debug!("replied: {entry:?}");
+            // debug!("iter'd: {entry:?}");
+            if reply.add(
+                entry.1.0,
+                (i + 1) as i64,
+                entry.1.1.kind,
+                entry.0.slice_encoded_bytes(1..),
+            ) {
+                // debug!("replied: {entry:?}");
                 break;
             }
         }

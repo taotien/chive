@@ -1,4 +1,4 @@
-#![feature(let_chains)]
+#![feature(let_chains, os_str_slice)]
 
 use std::{
     os::unix::fs::{FileTypeExt, MetadataExt},
