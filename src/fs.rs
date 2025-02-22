@@ -18,7 +18,7 @@ type Inode = u64;
 
 pub struct ChiveFS {
     pub path: PathBuf,
-    entries: BTreeMap<OsString, (Inode, FileAttr)>,
+    entries: BTreeMap<OsString, FileAttr>,
     // build during lookup, or is elsewhere better?
     // TODO don't clone again for this reverse lookup?
     ino_map: HashMap<Inode, OsString>,
@@ -42,11 +42,11 @@ impl ChiveFS {
                 .flatten()
                 .filter(|e| e.file_type().is_ok_and(|e| e.is_file()))
                 .filter(|e| e.file_name().to_string_lossy().contains("chive"))
-                .enumerate()
-                .map(|(i, e)| {
+                // .enumerate()
+                .map(|e| {
                     (
                         e.file_name(),
-                        (i as u64, from_metadata_to_fileattr(&e.metadata().unwrap())),
+                        from_metadata_to_fileattr(&e.metadata().unwrap()),
                     )
                 }),
         );
@@ -71,10 +71,10 @@ impl Filesystem for ChiveFS {
         trace!("lookup");
         debug!("parent: {parent}, name: {name:?}");
 
-        let mut lookup = OsString::from(".");
-        lookup.push(name);
+        // let mut lookup = OsString::from(".");
+        // lookup.push(name);
         if parent == 1
-            && let Some((name, (ino, attr))) = self.entries.get_key_value(&lookup)
+            && let Some((name, attr)) = self.entries.get_key_value(name)
         {
             debug!("entry: {attr:?}");
             reply.entry(
@@ -129,7 +129,9 @@ impl Filesystem for ChiveFS {
         debug!("reply: {reply:?}");
 
         let mut path = self.path.clone();
+        debug!("path: {path:?}");
         path.push(self.ino_map.get(&ino).unwrap());
+        debug!("path push: {path:?}");
         let data: Vec<u8> = File::open(path).unwrap().bytes().flatten().collect();
 
         reply.data(&data);
@@ -152,12 +154,7 @@ impl Filesystem for ChiveFS {
 
         for (i, entry) in self.entries.iter().enumerate().skip(offset as usize) {
             // debug!("iter'd: {entry:?}");
-            if reply.add(
-                entry.1.0,
-                (i + 1) as i64,
-                entry.1.1.kind,
-                entry.0.slice_encoded_bytes(1..),
-            ) {
+            if reply.add(entry.1.ino, (i + 1) as i64, entry.1.kind, entry.0) {
                 // debug!("replied: {entry:?}");
                 break;
             }

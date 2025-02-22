@@ -1,28 +1,24 @@
 #![feature(path_add_extension, dir_entry_ext2)]
 
 use std::{
-    ffi::OsString,
     fs::{self, write},
-    os::unix::fs::{DirEntryExt2, FileTypeExt, MetadataExt},
+    os::unix::fs::DirEntryExt2,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
 };
 
 use chive::fs::ChiveFS;
 use clap::{Parser, Subcommand};
-use fuser::{FileType, MountOption};
-use libc::ENOENT;
+use fuser::MountOption;
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum Commands {
     Init {
         #[arg(short, long)]
@@ -43,6 +39,7 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
+    debug!("cli: {cli:?}");
     match &cli.command {
         Commands::Init { path, yes } => chive_init(path, *yes)?,
         Commands::Clear => chive_clear()?,
@@ -61,22 +58,19 @@ struct Chive {
 }
 
 fn chive_init(path: &Path, yes: bool) -> anyhow::Result<()> {
+    trace!("init");
     let entries = fs::read_dir(path)?;
     for entry in entries
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|e| e.is_file()))
         .filter(|e| !e.file_name().to_string_lossy().contains("chive"))
     {
-        let prepend_dot = {
-            let mut p = OsString::from(".");
-            p.push(entry.file_name_ref());
-            p
-        };
+        debug!("entry: {entry:?}");
         let sidecar_path = entry
             .path()
-            .with_file_name(prepend_dot)
+            .with_file_name(entry.file_name_ref())
             .with_added_extension("chive");
-        println!("{:?}", sidecar_path);
+        debug!("sidecar_path {sidecar_path:?}");
         if yes {
             let sidecar = Chive::default();
             write(sidecar_path, toml::to_string(&sidecar)?)?;
@@ -101,12 +95,16 @@ fn chive_exec() -> anyhow::Result<()> {
 
 fn chive_run(path: &Path, mountpoint: &Path) -> anyhow::Result<()> {
     let chive = ChiveFS::new(path.into());
-    fuser::mount2(chive, mountpoint, &[
-        MountOption::RO,
-        MountOption::FSName("ChiveFS".to_string()),
-        // MountOption::AutoUnmount,
-        // MountOption::AllowRoot,
-    ])?;
+    fuser::mount2(
+        chive,
+        mountpoint,
+        &[
+            MountOption::RO,
+            MountOption::FSName("ChiveFS".to_string()),
+            // MountOption::AutoUnmount,
+            // MountOption::AllowRoot,
+        ],
+    )?;
 
     Ok(())
 }
