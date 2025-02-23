@@ -1,13 +1,20 @@
-#![feature(let_chains, os_str_slice)]
+#![feature(let_chains, os_str_slice, path_add_extension)]
 
 use std::{
     os::unix::fs::{FileTypeExt, MetadataExt},
     time::UNIX_EPOCH,
 };
 
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 pub mod fs;
+
+#[derive(Serialize, Deserialize, Default, Debug)]
+pub struct Chive {
+    // hash
+    tags: Vec<String>,
+}
 
 // this is extremely gross
 pub fn from_metadata_to_fileattr(value: &std::fs::Metadata) -> fuser::FileAttr {

@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     ffi::OsString,
     fmt::Debug,
-    fs::{self, File},
+    fs::{self, read_to_string},
     io::Read,
     path::PathBuf,
     time::Duration,
@@ -12,16 +12,15 @@ use fuser::{FileAttr, Filesystem};
 use libc::ENOENT;
 use log::{debug, trace};
 
-use crate::from_metadata_to_fileattr;
-
-type Inode = u64;
+use crate::{Chive, from_metadata_to_fileattr};
 
 pub struct ChiveFS {
-    pub path: PathBuf,
-    entries: BTreeMap<OsString, FileAttr>,
+    root: (PathBuf, FileAttr),
+    entries: BTreeMap<OsString, (u64, FileAttr)>,
+    chives: BTreeMap<OsString, (u64, FileAttr)>,
     // build during lookup, or is elsewhere better?
     // TODO don't clone again for this reverse lookup?
-    ino_cache: HashMap<Inode, OsString>,
+    ino_cache: HashMap<u64, OsString>,
 }
 
 impl Debug for ChiveFS {
@@ -36,31 +35,41 @@ impl ChiveFS {
     pub fn new(path: PathBuf) -> Self {
         // TODO why does example also have "." and ".."?
         debug!("path: {path:?}");
-        let entries = BTreeMap::from_iter(
-            fs::read_dir(&path)
-                .expect("couldn't read {self.path}")
-                .flatten()
-                .filter(|e| e.file_type().is_ok_and(|e| e.is_file()))
-                // .filter(|e| e.file_name().to_string_lossy().contains("chive"))
-                .map(|e| {
+        let (entries, chives) = fs::read_dir(&path)
+            .expect("couldn't open {self.path} for listing")
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|e| e.is_file()))
+            .enumerate()
+            .map(|(ino, e)| {
+                (
+                    e.file_name(),
                     (
-                        e.file_name(),
+                        ino as u64 + 2,
                         from_metadata_to_fileattr(&e.metadata().unwrap()),
-                    )
-                }),
-        );
-        debug!("entries: {:#?}", entries);
+                    ),
+                )
+            })
+            .partition(|(name, _)| !name.to_string_lossy().contains("chive"));
 
+        debug!("entries: {:#?}", entries);
+        debug!("chives: {:#?}", chives);
+
+        let meta = from_metadata_to_fileattr(&path.metadata().unwrap());
         Self {
-            path,
+            root: (path, meta),
             entries,
+            chives,
             ino_cache: HashMap::new(),
         }
     }
 
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        todo!()
+    }
 
-    fn commit(&self) {}
+    fn commit(&self) {
+        todo!()
+    }
 }
 
 impl Filesystem for ChiveFS {
@@ -74,10 +83,7 @@ impl Filesystem for ChiveFS {
         trace!("getattr");
         debug!("ino: {ino}");
         match ino {
-            1 => reply.attr(
-                &TTL,
-                &from_metadata_to_fileattr(&self.path.metadata().unwrap()),
-            ),
+            1 => reply.attr(&TTL, &self.root.1),
             //     2 =>
             _ => {
                 debug!("unknown ino");
@@ -94,15 +100,21 @@ impl Filesystem for ChiveFS {
         offset: i64,
         mut reply: fuser::ReplyDirectory,
     ) {
-        trace!("readdir");
-        debug!("offset: {offset}");
+        // trace!("readdir");
+        debug!(target: "readdir", "offset: {offset}");
         if ino != 1 {
             reply.error(ENOENT);
             return;
         }
 
-        for (i, entry) in self.entries.iter().enumerate().skip(offset as usize) {
-            if reply.add(entry.1.ino, (i + 1) as i64, entry.1.kind, entry.0) {
+        for (i, (name, (ino, file_attr))) in self
+            .entries
+            .iter()
+            .chain(self.chives.iter())
+            .enumerate()
+            .skip(offset as usize)
+        {
+            if reply.add(*ino, (i + 1) as i64, file_attr.kind, name) {
                 break;
             }
         }
@@ -119,14 +131,29 @@ impl Filesystem for ChiveFS {
         trace!("lookup");
         debug!("parent: {parent}, name: {name:?}");
 
-        if parent == 1
-            && let Some((name, attr)) = self.entries.get_key_value(name)
-        {
-            debug!("entry: {attr:?}");
+        if parent != 1 {
+            reply.error(ENOENT);
+            return;
+        }
+
+        if let Some((name, (ino, file_attr))) = self.entries.get_key_value(name) {
+            debug!("entry: ino: {ino}, attr: {file_attr:?}");
+            let mut file_attr = *file_attr;
+            file_attr.ino = *ino;
             reply.entry(
-                &TTL, attr, 0, // TODO generation needs to be unique over NFS, we don't care rn
+                &TTL, &file_attr,
+                0, // TODO generation needs to be unique over NFS, we don't care rn
             );
-            self.ino_cache.insert(attr.ino, name.clone());
+            self.ino_cache.insert(*ino, name.clone());
+        } else if let Some((name, (ino, file_attr))) = self.chives.get_key_value(name) {
+            debug!("entry: ino: {ino}, attr: {file_attr:?}");
+            let mut file_attr = *file_attr;
+            file_attr.ino = *ino;
+            reply.entry(
+                &TTL, &file_attr,
+                0, // TODO generation needs to be unique over NFS, we don't care rn
+            );
+            self.ino_cache.insert(*ino, name.clone());
         } else {
             reply.error(ENOENT)
         }
@@ -152,7 +179,7 @@ impl Filesystem for ChiveFS {
         debug!("lock_owner: {lock_owner:?}");
         debug!("reply: {reply:?}");
 
-        let mut path = self.path.clone();
+        let (mut path, _) = self.root.clone();
         debug!("path root: {path:?}");
         path.push(self.ino_cache.get(&ino).unwrap());
         debug!("path file: {path:?}");

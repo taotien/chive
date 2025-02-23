@@ -6,11 +6,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chive::fs::ChiveFS;
+use chive::{Chive, fs::ChiveFS};
 use clap::{Parser, Subcommand};
 use fuser::MountOption;
 use log::{debug, trace};
-use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -51,12 +50,6 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Serialize, Deserialize, Default)]
-struct Chive {
-    // hash
-    tags: Vec<String>,
-}
-
 fn chive_init(path: &Path, yes: bool) -> anyhow::Result<()> {
     trace!("init");
     let entries = fs::read_dir(path)?;
@@ -85,12 +78,12 @@ fn chive_init(path: &Path, yes: bool) -> anyhow::Result<()> {
 fn chive_clear() -> anyhow::Result<()> {
     todo!();
 
-    Ok(())
+    // Ok(())
 }
 
 fn chive_exec() -> anyhow::Result<()> {
     todo!();
-    Ok(())
+    // Ok(())
 }
 
 fn chive_run(path: &Path, mountpoint: &Path) -> anyhow::Result<()> {
