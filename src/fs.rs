@@ -23,12 +23,6 @@ pub struct ChiveFS {
     ino_cache: HashMap<u64, OsString>,
 }
 
-impl Debug for ChiveFS {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#?}", self.entries.keys())
-    }
-}
-
 const TTL: Duration = Duration::from_secs(1);
 
 impl ChiveFS {
@@ -83,8 +77,13 @@ impl Filesystem for ChiveFS {
         trace!("getattr");
         debug!("ino: {ino}");
         match ino {
-            1 => reply.attr(&TTL, &self.root.1),
-            //     2 =>
+            1 => {
+                let mut attr = self.root.1;
+                attr.ino = 1;
+                // debug!("reply attr: {:?}", attr);
+                reply.attr(&TTL, &attr);
+            }
+            // 2 =>
             _ => {
                 debug!("unknown ino");
                 reply.error(ENOENT);
@@ -100,7 +99,7 @@ impl Filesystem for ChiveFS {
         offset: i64,
         mut reply: fuser::ReplyDirectory,
     ) {
-        // trace!("readdir");
+        trace!("readdir");
         debug!(target: "readdir", "offset: {offset}");
         if ino != 1 {
             reply.error(ENOENT);
@@ -114,9 +113,13 @@ impl Filesystem for ChiveFS {
             .enumerate()
             .skip(offset as usize)
         {
+            debug!("reply add: ino {ino}, name {name:?}, attr {file_attr:?}, offset: {i}");
             if reply.add(*ino, (i + 1) as i64, file_attr.kind, name) {
                 break;
             }
+        }
+        if offset == 2 {
+            reply.add(21, offset + 1, fuser::FileType::Directory, "dir");
         }
         reply.ok();
     }

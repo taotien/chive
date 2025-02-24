@@ -1,5 +1,6 @@
 set shell := ["nu", "-c"]
 
+# export RUST_LOG := "trace"
 export RUST_LOG := "chive=trace"
 
 run:
